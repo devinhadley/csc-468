@@ -46,9 +46,9 @@ DEFAULT_DISK_PAGES_PATH = "disk_pages.json"
 
 
 def redo(
+    wal: list[dict],
     dirty_page_table: dict,
-    wal_path=DEFAULT_WAL_FILE_PATH,
-    disk_pages_path=DEFAULT_DISK_PAGES_PATH,
+    disk_pages: dict,
 ) -> None:
     # Redo all updates starting from the recovery lsn.
     # We do this in order to ensure that winners are written to disk (fix no-force), and
@@ -56,29 +56,26 @@ def redo(
 
     min_recovery_lsn = min(dirty_page_table.values())
 
-    lines = None
-    with open(wal_path) as f:  # NOTE: loads entire file into memory. Can be bad...
-        lines = f.readlines()
-
-    # Find the index of start WAL.
-
-    start_index = 0
-    for index, line in enumerate(lines):
-        wal_entry = json.loads(line)
-        if wal_entry["LSN"] == min_recovery_lsn:
-            start_index = index
-
     # Redo every WAL update from here!
-    for i in range(start_index, len(lines), 1):
-        line = lines[i]
-        wal_entry = json.loads(line)
+    for wal_entry in wal:
+        # No need to process entries until we reach recovery lsn.
+        if wal_entry["LSN"] < min_recovery_lsn:
+            continue
 
-        if wal_entry["type"] == "UPDATE" and (
-            True
-        ):  # TODO: Ensure WAL LSN is greater than the current page lsn.
-            pass
+        if wal_entry["type"] != "UPDATE":
+            continue
 
-        pass
+        wal_lsn = wal_entry["LSN"]
+        wal_page = wal_entry["page"]
+        page_lsn = disk_pages[wal_page]["pageLSN"]
+
+        # If wal LSN is less than or equal to the page LSN no need to redo...
+        if wal_lsn <= page_lsn:
+            # This page has been redone already in a previous recovery...
+            continue
+
+        disk_pages[wal_page]["value"] = wal_entry["after"]
+        disk_pages[wal_page]["pageLSN"] = wal_lsn
 
 
 def undo(transaction_table: dict) -> None:
@@ -226,14 +223,14 @@ def _load_pages(path: str) -> dict:
 def main():
     # Load pages and WAL.
     wal = _load_wal(DEFAULT_WAL_FILE_PATH)
-    pages = _load_pages(DEFAULT_DISK_PAGES_PATH)
+    disk_pages = _load_pages(DEFAULT_DISK_PAGES_PATH)
 
     # Perform Analysis.
     transaction_table, dirty_page_table = analysis(wal)
     _print_analysis_report(transaction_table, dirty_page_table)
 
     # Perform Redo.
-    redo(dirty_page_table)
+    redo(wal, dirty_page_table, disk_pages)
 
     # Perform Undo.
     undo(transaction_table)
