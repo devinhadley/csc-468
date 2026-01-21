@@ -34,6 +34,14 @@ import json
 # recLSN (recovery LSN) = the earliest log record whose effects on the page are not guarenteed to be on disk.
 # It is where redo should begin from.
 
+# Why redo and undo?
+# Because the state of the disk is unknown at crash time (steal, no force).
+# By redoing everything, we put the db in a state where we can revert
+# Redo → solves NO-FORCE (winner data might be missing from disk)
+# Undo → solves STEAL (loser data might be present on disk)
+# We redo losers because we need to walk back the existing changes.
+
+
 WAL_FILE_PATH = "./wal.jsonl"
 
 
@@ -45,6 +53,41 @@ def undo():
     # Perform a single backward scan of the log to simultaneously
     # undo all operations belonging to uncommitted "loser" transactions in reverse chronological order.
     return
+
+
+def _print_analysis_report(transaction_table, dirty_page_table):
+    winners = [
+        tx for tx, info in transaction_table.items() if info["status"] == "COMMITTED"
+    ]
+    losers = [
+        tx for tx, info in transaction_table.items() if info["status"] != "COMMITTED"
+    ]
+
+    print("Analysis Report:")
+
+    print("\tWinner Transaction IDs:")
+    if winners:
+        for tx in winners:
+            print(f"\t\t{tx}")
+    else:
+        print("\t\tNo winner transactions.")
+
+    print("\tLoser Transaction IDs:")
+    if losers:
+        for tx in losers:
+            print(f"\t\t{tx}")
+    else:
+        print("\t\tNo loser transactions.")
+
+    print("\tTransaction Table After Analysis:")
+    print(f"\t\tTX, STATUS, lastLSN")
+    for tx, info in transaction_table.items():
+        print(f"\t\t{tx}, {info['status']}, {info['lastLSN']}")
+
+    print("\tDirty Page Table After Analysis:")
+    print(f"\t\tPAGE, recLSN")
+    for page, rec_lsn in dirty_page_table.items():
+        print(f"\t\t{page}, {rec_lsn}")
 
 
 def analysis():
@@ -77,9 +120,6 @@ def analysis():
             case {"type": "CHECKPOINT", "DPT": dpt_snapshot, "TT": tt_snapshot}:
                 dirty_page_table = dpt_snapshot
                 transaction_table = tt_snapshot
-                print(
-                    f"Checkpoint processed. Restored {len(tt_snapshot)} transactions."
-                )
                 checkpoint_index = i
                 break
             case _:
@@ -87,9 +127,6 @@ def analysis():
 
     # 2.) Now process all logs after the latest checkpoint.
     # to ensure we have the most up to date tables...
-
-    print(dirty_page_table)
-    print(transaction_table)
 
     for i in range(checkpoint_index + 1, len(lines), 1):
         line = lines[i]
@@ -128,6 +165,8 @@ def analysis():
                 # No longer need to manage this transaction...
                 # A winner of sorts...
                 transaction_table.pop(tx)
+
+    _print_analysis_report(transaction_table, dirty_page_table)
 
     return
 
