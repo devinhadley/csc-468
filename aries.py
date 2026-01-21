@@ -1,4 +1,5 @@
 from collections import defaultdict
+import json
 
 # 1.) Analysis
 # - We first reconstruct the transaction and dirty page table to determine which transactions were commited and not commited.
@@ -27,9 +28,13 @@ from collections import defaultdict
 # following a commmit (no-force). Thus, if there is a failure we need to restore
 # the disk to a known state, and then undo the uncommited changes
 
-_BEGIN_WAL_PROTO = {
-    "LSN": None,
-}
+# lastLSN (last LSN for transaction) = the the most recent log record wirrtten by a given transaction.
+# This is the point which undo will rollback from for loser transactions.
+
+# recLSN (recovery LSN) = the earliest log record whose effects on the page are not guarenteed to be on disk.
+# It is where redo should begin from.
+
+WAL_FILE_PATH = "./wal.jsonl"
 
 
 def redo():
@@ -37,20 +42,92 @@ def redo():
 
 
 def undo():
+    # Perform a single backward scan of the log to simultaneously
+    # undo all operations belonging to uncommitted "loser" transactions in reverse chronological order.
     return
 
 
 def analysis():
-    dirty_page_table = defaultdict(int)
-    transaction_table = defaultdict(dict)
+    dirty_page_table = {}
+
+    # Page mumber -> recLSN (the earliest LSN where that page was modified since it became dirty).
+
+    transaction_table = {}
 
     # Goals:
     # - Construct dirty page table.
     # - Construct transaction table.
 
-    # 1.) Scan from the bottom up and determine the latest checkpoint.
+    # 1.) Scan from the large lsn to low lsn and determine the latest checkpoint.
     # 2.) Initialize the tables from the checkpoint.
-    # 3.) Then scan back down to update the tables to latest state.
+    # 3.) Then scan from small lsn to large lsn to update the tables to latest state.
+
+    # 1.) Find the index of the latest checkpoint (if any).
+    lines = None
+    with open(WAL_FILE_PATH) as f:  # NOTE: loads entire file into memory. Can be bad...
+        lines = f.readlines()
+
+    checkpoint_index = 0
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i]
+
+        wal_entry = json.loads(line)
+
+        match wal_entry:
+            case {"type": "CHECKPOINT", "DPT": dpt_snapshot, "TT": tt_snapshot}:
+                dirty_page_table = dpt_snapshot
+                transaction_table = tt_snapshot
+                print(
+                    f"Checkpoint processed. Restored {len(tt_snapshot)} transactions."
+                )
+                checkpoint_index = i
+                break
+            case _:
+                continue
+
+    # 2.) Now process all logs after the latest checkpoint.
+    # to ensure we have the most up to date tables...
+
+    print(dirty_page_table)
+    print(transaction_table)
+
+    for i in range(checkpoint_index + 1, len(lines), 1):
+        line = lines[i]
+        wal_entry = json.loads(line)
+
+        match wal_entry:
+            case {"LSN": lsn, "type": "BEGIN", "tx": tx}:
+                # Add this transaction to the transaction table...
+                transaction_table[tx] = {
+                    "status": "RUNNING",
+                    "lastLSN": lsn,
+                }
+            case {
+                "LSN": lsn,
+                "type": "UPDATE",
+                "tx": tx,
+                "page": page,
+            }:
+                # Update the last lsn for this transaction, and update the pages
+                # dirty page table entry for redo later if earliest update.
+                transaction_table[tx]["lastLSN"] = lsn
+                # Add this page to the dirty page table if not already in there.
+                if page not in dirty_page_table:
+                    dirty_page_table[page] = lsn
+
+            case {"LSN": lsn, "type": "COMMIT", "tx": tx}:
+                # Will consider this transaction a winnner later doing undo...
+                transaction_table[tx]["status"] = "COMMITED"
+                transaction_table[tx]["lastLSN"] = lsn
+
+            case {"LSN": lsn, "type": "ABORT", "tx": tx}:
+                # Add this transaction to the transaction table...
+                transaction_table[tx]["status"] = "ABORTED"
+                transaction_table[tx]["lastLSN"] = lsn
+            case {"LSN": _, "type": "END", "tx": tx}:
+                # No longer need to manage this transaction...
+                # A winner of sorts...
+                transaction_table.pop(tx)
 
     return
 
@@ -69,6 +146,7 @@ def analysis():
 
 
 def main():
+    analysis()
     return
 
 
