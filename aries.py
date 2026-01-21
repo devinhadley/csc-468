@@ -42,9 +42,14 @@ import json
 # We redo losers because we need to walk back the existing changes.
 
 DEFAULT_WAL_FILE_PATH = "./files/wal.jsonl"
+DEFAULT_DISK_PAGES_PATH = "disk_pages.json"
 
 
-def redo(dirty_page_table: dict, wal_path=DEFAULT_WAL_FILE_PATH) -> None:
+def redo(
+    dirty_page_table: dict,
+    wal_path=DEFAULT_WAL_FILE_PATH,
+    disk_pages_path=DEFAULT_DISK_PAGES_PATH,
+) -> None:
     # Redo all updates starting from the recovery lsn.
     # We do this in order to ensure that winners are written to disk (fix no-force), and
     # to put losers in a state that we can undo from (fix steal).
@@ -117,7 +122,7 @@ def _print_analysis_report(transaction_table, dirty_page_table):
         print(f"\t\t{page}, {rec_lsn}")
 
 
-def analysis(wal_path=DEFAULT_WAL_FILE_PATH) -> tuple[dict, dict]:
+def analysis(wal: list[dict]) -> tuple[dict, dict]:
     # TODO: Fill me in with what I do!
     """I return the transaction table then the dirty page table."""
     dirty_page_table = {}
@@ -135,15 +140,9 @@ def analysis(wal_path=DEFAULT_WAL_FILE_PATH) -> tuple[dict, dict]:
     # 3.) Then scan from small lsn to large lsn to update the tables to latest state.
 
     # 1.) Find the index of the latest checkpoint (if any).
-    lines = None
-    with open(wal_path) as f:  # NOTE: loads entire file into memory. Can be bad...
-        lines = f.readlines()
-
     checkpoint_index = None
-    for i in range(len(lines) - 1, -1, -1):
-        line = lines[i]
-
-        wal_entry = json.loads(line)
+    for i in range(len(wal) - 1, -1, -1):
+        wal_entry = wal[i]
 
         match wal_entry:
             case {"type": "CHECKPOINT", "DPT": dpt_snapshot, "TT": tt_snapshot}:
@@ -161,9 +160,8 @@ def analysis(wal_path=DEFAULT_WAL_FILE_PATH) -> tuple[dict, dict]:
     if checkpoint_index is None:
         checkpoint_index = -1
 
-    for i in range(checkpoint_index + 1, len(lines), 1):
-        line = lines[i]
-        wal_entry = json.loads(line)
+    for i in range(checkpoint_index + 1, len(wal), 1):
+        wal_entry = wal[i]
 
         match wal_entry:
             case {"LSN": lsn, "type": "BEGIN", "tx": tx}:
@@ -215,10 +213,29 @@ def analysis(wal_path=DEFAULT_WAL_FILE_PATH) -> tuple[dict, dict]:
 #    [ ] Output final disk_pages_after.json representing disk state after recovery (value + pageLSN per page).
 
 
+def _load_wal(path: str) -> list[dict]:
+    with open(path) as f:
+        return [json.loads(line) for line in f]
+
+
+def _load_pages(path: str) -> dict:
+    with open(path) as f:
+        return json.load(f)
+
+
 def main():
-    transaction_table, dirty_page_table = analysis()
+    # Load pages and WAL.
+    wal = _load_wal(DEFAULT_WAL_FILE_PATH)
+    pages = _load_pages(DEFAULT_DISK_PAGES_PATH)
+
+    # Perform Analysis.
+    transaction_table, dirty_page_table = analysis(wal)
     _print_analysis_report(transaction_table, dirty_page_table)
+
+    # Perform Redo.
     redo(dirty_page_table)
+
+    # Perform Undo.
     undo(transaction_table)
     return
 

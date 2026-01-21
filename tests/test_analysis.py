@@ -1,28 +1,9 @@
-import json
-import os
 import unittest
 
 from aries import analysis
 
-TMP_WAL_PATH = "tests/tmp/test_wal.jsonl"
-
-
-def write_wal_jsonl(path: str, wal: list[dict]) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        for entry in wal:
-            f.write(json.dumps(entry) + "\n")
-
 
 class TestAnalysis(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        os.makedirs(os.path.dirname(TMP_WAL_PATH), exist_ok=True)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        if os.path.exists(TMP_WAL_PATH):
-            os.remove(TMP_WAL_PATH)
-
     def test_simple_no_checkpoint(self) -> None:
         wal = [
             {"LSN": 5, "type": "BEGIN", "tx": "T1"},
@@ -45,9 +26,7 @@ class TestAnalysis(unittest.TestCase):
             },
         ]
 
-        write_wal_jsonl(TMP_WAL_PATH, wal)
-
-        tt, dpt = analysis(TMP_WAL_PATH)
+        tt, dpt = analysis(wal)
 
         self.assertIn("T1", tt)
         self.assertIn("T2", tt)
@@ -81,9 +60,7 @@ class TestAnalysis(unittest.TestCase):
             {"LSN": 15, "type": "COMMIT", "tx": "T1"},
         ]
 
-        write_wal_jsonl(TMP_WAL_PATH, wal)
-
-        tt, dpt = analysis(TMP_WAL_PATH)
+        tt, dpt = analysis(wal)
 
         self.assertEqual(tt["T1"]["status"], "COMMITTED")
         self.assertEqual(tt["T2"]["status"], "RUNNING")
@@ -103,9 +80,7 @@ class TestAnalysis(unittest.TestCase):
             {"LSN": 20, "type": "END", "tx": "T1"},
         ]
 
-        write_wal_jsonl(TMP_WAL_PATH, wal)
-
-        tt, dpt = analysis(TMP_WAL_PATH)
+        tt, dpt = analysis(wal)
 
         self.assertNotIn("T1", tt)
 
@@ -138,9 +113,7 @@ class TestAnalysis(unittest.TestCase):
             },
         ]
 
-        write_wal_jsonl(TMP_WAL_PATH, wal)
-
-        tt, dpt = analysis(TMP_WAL_PATH)
+        tt, dpt = analysis(wal)
 
         self.assertEqual(dpt["P1"], 10)
 
