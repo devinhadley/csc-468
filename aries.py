@@ -41,15 +41,39 @@ import json
 # Undo → solves STEAL (loser data might be present on disk)
 # We redo losers because we need to walk back the existing changes.
 
-
 WAL_FILE_PATH = "./wal.jsonl"
 
 
-def redo():
-    pass
+def _redo(dirty_page_table: dict) -> None:
+    # Redo all updates starting from the recovery lsn.
+    # We do this in order to ensure that winners are written to disk (fix no-force), and
+    # to put losers in a state that we can undo from (fix steal).
+
+    min_recovery_lsn = min(dirty_page_table.values())
+
+    lines = None
+    with open(WAL_FILE_PATH) as f:  # NOTE: loads entire file into memory. Can be bad...
+        lines = f.readlines()
+
+    # Find the index of start WAL.
+
+    start_index = 0
+    for index, line in enumerate(lines):
+        wal_entry = json.loads(line)
+        if wal_entry["LSN"] == min_recovery_lsn:
+            start_index = index
+
+    # Redo every WAL update from here!
+    for i in range(start_index, len(lines), 1):
+        wal_entry = json.loads(line)
+
+        if wal_entry["type"] == "UPDATE" and wal_entry["LSN"] > disk_pages[....]:
+            pass
+
+        pass
 
 
-def undo():
+def _undo(transaction_table: dict) -> None:
     # Perform a single backward scan of the log to simultaneously
     # undo all operations belonging to uncommitted "loser" transactions in reverse chronological order.
     return
@@ -90,7 +114,9 @@ def _print_analysis_report(transaction_table, dirty_page_table):
         print(f"\t\t{page}, {rec_lsn}")
 
 
-def analysis():
+def _analysis() -> tuple[dict, dict]:
+    # TODO: Fill me in with what I do!
+    """I return the transaction table then the dirty page table."""
     dirty_page_table = {}
 
     # Page mumber -> recLSN (the earliest LSN where that page was modified since it became dirty).
@@ -166,26 +192,27 @@ def analysis():
                 # A winner of sorts...
                 transaction_table.pop(tx)
 
-    _print_analysis_report(transaction_table, dirty_page_table)
-
-    return
+    return transaction_table, dirty_page_table
 
 
 # Expected Output
 #
-#    Print winner and loser transactions.
+#    [x] Print winner and loser transactions.
 #
-#    Print TT and DPT after Analysis.
+#    [x] Print TT and DPT after Analysis.
 #
-#    Print which updates are redone (by LSN).
+#    [ ] Print which updates are redone (by LSN).
 #
-#    Print which updates are undone (by LSN).
+#    [ ] Print which updates are undone (by LSN).
 #
-#    Output final disk_pages_after.json representing disk state after recovery (value + pageLSN per page).
+#    [ ] Output final disk_pages_after.json representing disk state after recovery (value + pageLSN per page).
 
 
 def main():
-    analysis()
+    transaction_table, dirty_page_table = _analysis()
+    _print_analysis_report(transaction_table, dirty_page_table)
+    _redo(dirty_page_table)
+    _undo(transaction_table)
     return
 
 
