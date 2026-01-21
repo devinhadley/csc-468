@@ -41,10 +41,10 @@ import json
 # Undo → solves STEAL (loser data might be present on disk)
 # We redo losers because we need to walk back the existing changes.
 
-WAL_FILE_PATH = "./wal.jsonl"
+DEFAULT_WAL_FILE_PATH = "./files/wal.jsonl"
 
 
-def _redo(dirty_page_table: dict) -> None:
+def redo(dirty_page_table: dict, wal_path=DEFAULT_WAL_FILE_PATH) -> None:
     # Redo all updates starting from the recovery lsn.
     # We do this in order to ensure that winners are written to disk (fix no-force), and
     # to put losers in a state that we can undo from (fix steal).
@@ -52,7 +52,7 @@ def _redo(dirty_page_table: dict) -> None:
     min_recovery_lsn = min(dirty_page_table.values())
 
     lines = None
-    with open(WAL_FILE_PATH) as f:  # NOTE: loads entire file into memory. Can be bad...
+    with open(wal_path) as f:  # NOTE: loads entire file into memory. Can be bad...
         lines = f.readlines()
 
     # Find the index of start WAL.
@@ -65,15 +65,18 @@ def _redo(dirty_page_table: dict) -> None:
 
     # Redo every WAL update from here!
     for i in range(start_index, len(lines), 1):
+        line = lines[i]
         wal_entry = json.loads(line)
 
-        if wal_entry["type"] == "UPDATE" and wal_entry["LSN"] > disk_pages[....]:
+        if wal_entry["type"] == "UPDATE" and (
+            True
+        ):  # TODO: Ensure WAL LSN is greater than the current page lsn.
             pass
 
         pass
 
 
-def _undo(transaction_table: dict) -> None:
+def undo(transaction_table: dict) -> None:
     # Perform a single backward scan of the log to simultaneously
     # undo all operations belonging to uncommitted "loser" transactions in reverse chronological order.
     return
@@ -114,7 +117,7 @@ def _print_analysis_report(transaction_table, dirty_page_table):
         print(f"\t\t{page}, {rec_lsn}")
 
 
-def _analysis() -> tuple[dict, dict]:
+def analysis(wal_path=DEFAULT_WAL_FILE_PATH) -> tuple[dict, dict]:
     # TODO: Fill me in with what I do!
     """I return the transaction table then the dirty page table."""
     dirty_page_table = {}
@@ -133,10 +136,10 @@ def _analysis() -> tuple[dict, dict]:
 
     # 1.) Find the index of the latest checkpoint (if any).
     lines = None
-    with open(WAL_FILE_PATH) as f:  # NOTE: loads entire file into memory. Can be bad...
+    with open(wal_path) as f:  # NOTE: loads entire file into memory. Can be bad...
         lines = f.readlines()
 
-    checkpoint_index = 0
+    checkpoint_index = None
     for i in range(len(lines) - 1, -1, -1):
         line = lines[i]
 
@@ -153,6 +156,10 @@ def _analysis() -> tuple[dict, dict]:
 
     # 2.) Now process all logs after the latest checkpoint.
     # to ensure we have the most up to date tables...
+
+    # There was no checkpoint, we should start from 0 and include log at 0.
+    if checkpoint_index is None:
+        checkpoint_index = -1
 
     for i in range(checkpoint_index + 1, len(lines), 1):
         line = lines[i]
@@ -179,14 +186,14 @@ def _analysis() -> tuple[dict, dict]:
                     dirty_page_table[page] = lsn
 
             case {"LSN": lsn, "type": "COMMIT", "tx": tx}:
-                # Will consider this transaction a winnner later doing undo...
-                transaction_table[tx]["status"] = "COMMITED"
                 transaction_table[tx]["lastLSN"] = lsn
+                # Will consider this transaction a winnner later doing undo...
+                transaction_table[tx]["status"] = "COMMITTED"
 
             case {"LSN": lsn, "type": "ABORT", "tx": tx}:
+                transaction_table[tx]["lastLSN"] = lsn
                 # Add this transaction to the transaction table...
                 transaction_table[tx]["status"] = "ABORTED"
-                transaction_table[tx]["lastLSN"] = lsn
             case {"LSN": _, "type": "END", "tx": tx}:
                 # No longer need to manage this transaction...
                 # A winner of sorts...
@@ -209,10 +216,10 @@ def _analysis() -> tuple[dict, dict]:
 
 
 def main():
-    transaction_table, dirty_page_table = _analysis()
+    transaction_table, dirty_page_table = analysis()
     _print_analysis_report(transaction_table, dirty_page_table)
-    _redo(dirty_page_table)
-    _undo(transaction_table)
+    redo(dirty_page_table)
+    undo(transaction_table)
     return
 
 
