@@ -42,7 +42,7 @@ import json
 # We redo losers because we need to walk back the existing changes.
 
 DEFAULT_WAL_FILE_PATH = "./files/wal.jsonl"
-DEFAULT_DISK_PAGES_PATH = "disk_pages.json"
+DEFAULT_DISK_PAGES_PATH = "./files/disk_pages.json"
 
 
 def redo(
@@ -281,10 +281,17 @@ def main():
     _print_analysis_report(transaction_table, dirty_page_table, ended_txns)
 
     # Perform Redo.
+    print("Page Update Report:")
+    print("\tRedone WAL Enrties By LSN:")
     redone_lsns = redo(wal, dirty_page_table, disk_pages)
+    for lsn in redone_lsns:
+        print(f"\t\t{str(lsn)}")
 
     # Perform Undo.
+    print("\tUndone WAL Enrties By LSN:")
     undone_lsns = undo(wal, transaction_table, disk_pages)
+    for lsn in undone_lsns:
+        print(f"\t\t{str(lsn)}")
 
     return
 
