@@ -1,4 +1,3 @@
-from collections import defaultdict
 import json
 
 # 1.) Analysis
@@ -43,6 +42,7 @@ import json
 
 DEFAULT_WAL_FILE_PATH = "./files/wal.jsonl"
 DEFAULT_DISK_PAGES_PATH = "./files/disk_pages.json"
+DISK_PAGES_OUT_PATH = "./disk_pages_after.json"
 
 
 def redo(
@@ -248,19 +248,6 @@ def analysis(wal: list[dict]) -> tuple[dict, dict, list]:
     return transaction_table, dirty_page_table, ended_transactions
 
 
-# Expected Output
-#
-#    [x] Print winner and loser transactions.
-#
-#    [x] Print TT and DPT after Analysis.
-#
-#    [ ] Print which updates are redone (by LSN).
-#
-#    [ ] Print which updates are undone (by LSN).
-#
-#    [ ] Output final disk_pages_after.json representing disk state after recovery (value + pageLSN per page).
-
-
 def _load_wal(path: str) -> list[dict]:
     with open(path) as f:
         return [json.loads(line) for line in f]
@@ -293,7 +280,9 @@ def main():
     for lsn in undone_lsns:
         print(f"\t\t{str(lsn)}")
 
-    return
+    # Write recovery to disk.
+    with open(DISK_PAGES_OUT_PATH, "w") as f:
+        json.dump(disk_pages, f, indent=2)
 
 
 if __name__ == "__main__":
