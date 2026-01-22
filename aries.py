@@ -132,11 +132,11 @@ def undo(
     return undone_lsns
 
 
-def _print_analysis_report(transaction_table, dirty_page_table):
-    # FIXME: This does not include transactions that ended (also winners)!
+def _print_analysis_report(transaction_table, dirty_page_table, ended_txns):
     winners = [
         tx for tx, info in transaction_table.items() if info["status"] == "COMMITTED"
-    ]
+    ] + ended_txns
+
     losers = [
         tx for tx, info in transaction_table.items() if info["status"] != "COMMITTED"
     ]
@@ -168,7 +168,7 @@ def _print_analysis_report(transaction_table, dirty_page_table):
         print(f"\t\t{page}, {rec_lsn}")
 
 
-def analysis(wal: list[dict]) -> tuple[dict, dict]:
+def analysis(wal: list[dict]) -> tuple[dict, dict, list]:
     # TODO: Fill me in with what I do!
     """I return the transaction table then the dirty page table."""
     dirty_page_table = {}
@@ -176,6 +176,7 @@ def analysis(wal: list[dict]) -> tuple[dict, dict]:
     # Page mumber -> recLSN (the earliest LSN where that page was modified since it became dirty).
 
     transaction_table = {}
+    ended_transactions = []  # have to keep track of END transactions becasue they are1 removed from the txn table and will need to report on them later...
 
     # Goals:
     # - Construct dirty page table.
@@ -242,8 +243,9 @@ def analysis(wal: list[dict]) -> tuple[dict, dict]:
                 # No longer need to manage this transaction...
                 # A winner of sorts...
                 transaction_table.pop(tx)
+                ended_transactions.append(tx)
 
-    return transaction_table, dirty_page_table
+    return transaction_table, dirty_page_table, ended_transactions
 
 
 # Expected Output
@@ -275,14 +277,15 @@ def main():
     disk_pages = _load_pages(DEFAULT_DISK_PAGES_PATH)
 
     # Perform Analysis.
-    transaction_table, dirty_page_table = analysis(wal)
-    _print_analysis_report(transaction_table, dirty_page_table)
+    transaction_table, dirty_page_table, ended_txns = analysis(wal)
+    _print_analysis_report(transaction_table, dirty_page_table, ended_txns)
 
     # Perform Redo.
-    redo(wal, dirty_page_table, disk_pages)
+    redone_lsns = redo(wal, dirty_page_table, disk_pages)
 
     # Perform Undo.
-    undo(transaction_table)
+    undone_lsns = undo(wal, transaction_table, disk_pages)
+
     return
 
 

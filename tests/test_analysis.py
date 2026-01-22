@@ -26,7 +26,7 @@ class TestAnalysis(unittest.TestCase):
             },
         ]
 
-        tt, dpt = analysis(wal)
+        tt, dpt, _ = analysis(wal)
 
         self.assertIn("T1", tt)
         self.assertIn("T2", tt)
@@ -60,7 +60,7 @@ class TestAnalysis(unittest.TestCase):
             {"LSN": 15, "type": "COMMIT", "tx": "T1"},
         ]
 
-        tt, dpt = analysis(wal)
+        tt, dpt, _ = analysis(wal)
 
         self.assertEqual(tt["T1"]["status"], "COMMITTED")
         self.assertEqual(tt["T2"]["status"], "RUNNING")
@@ -80,9 +80,10 @@ class TestAnalysis(unittest.TestCase):
             {"LSN": 20, "type": "END", "tx": "T1"},
         ]
 
-        tt, dpt = analysis(wal)
+        tt, dpt, ended = analysis(wal)
 
         self.assertNotIn("T1", tt)
+        self.assertIn("T1", ended)
 
     def test_dpt_keeps_earliest_reclsn(self) -> None:
         wal = [
@@ -113,7 +114,7 @@ class TestAnalysis(unittest.TestCase):
             },
         ]
 
-        tt, dpt = analysis(wal)
+        tt, dpt, _ = analysis(wal)
 
         self.assertEqual(dpt["P1"], 10)
 
