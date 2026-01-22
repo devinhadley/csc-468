@@ -47,8 +47,8 @@ DEFAULT_DISK_PAGES_PATH = "disk_pages.json"
 
 def redo(
     wal: list[dict],
-    dirty_page_table: dict,
-    disk_pages: dict,
+    dirty_page_table: dict[str, int],
+    disk_pages: dict[str, dict],
 ) -> list[int]:
     # Redo all updates starting from the recovery lsn.
     # We do this in order to ensure that winners are written to disk (fix no-force), and
@@ -87,13 +87,53 @@ def redo(
     return redone_lsns
 
 
-def undo(transaction_table: dict) -> None:
+def undo(
+    wal: list[dict],
+    transaction_table: dict[str, dict],
+    disk_pages: dict[str, dict],
+) -> list[int]:
     # Perform a single backward scan of the log to simultaneously
     # undo all operations belonging to uncommitted "loser" transactions in reverse chronological order.
-    return
+
+    if not transaction_table:
+        # Nothing to undo!
+        return []
+
+    # Since we don't have prevLSN in wal we do the following:
+    # Scan up and undo anything part of a loser tranasction (not commited transaction or not in table (end)).
+
+    undone_lsns = []
+    next_lsn_to_write = wal[-1]["LSN"] + 1
+
+    for wal_entry in reversed(wal):
+        if wal_entry["type"] != "UPDATE":
+            continue
+
+        # We assume the transaction has ended if not in transaction table following analysis...
+        txn_id = wal_entry["tx"]
+        txn_status = transaction_table.get(txn_id, {"status": "END"})["status"]
+        if txn_status in ("COMMITTED", "END"):
+            continue
+
+        # Let's undo the change and write a CLR to the WAL.
+        page_number = wal_entry["page"]
+
+        clr = {"LSN": next_lsn_to_write, "type": "CLR"}
+
+        disk_pages[page_number]["pageLSN"] = clr["LSN"]
+        disk_pages[page_number]["value"] = wal_entry["before"]
+
+        undone_lsns.append(wal_entry["LSN"])
+
+        # iterating in the reverse direction so we will be okay.
+        wal.append(clr)
+        next_lsn_to_write += 1
+
+    return undone_lsns
 
 
 def _print_analysis_report(transaction_table, dirty_page_table):
+    # FIXME: This does not include transactions that ended (also winners)!
     winners = [
         tx for tx, info in transaction_table.items() if info["status"] == "COMMITTED"
     ]
