@@ -56,6 +56,10 @@ def redo(
 
     redone_lsns = []
 
+    if not dirty_page_table.values():
+        # Nothing to do...
+        return []
+
     min_recovery_lsn = min(dirty_page_table.values())
 
     # Redo every WAL update from here!
