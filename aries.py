@@ -49,10 +49,12 @@ def redo(
     wal: list[dict],
     dirty_page_table: dict,
     disk_pages: dict,
-) -> None:
+) -> list[int]:
     # Redo all updates starting from the recovery lsn.
     # We do this in order to ensure that winners are written to disk (fix no-force), and
     # to put losers in a state that we can undo from (fix steal).
+
+    redone_lsns = []
 
     min_recovery_lsn = min(dirty_page_table.values())
 
@@ -76,6 +78,9 @@ def redo(
 
         disk_pages[wal_page]["value"] = wal_entry["after"]
         disk_pages[wal_page]["pageLSN"] = wal_lsn
+        redone_lsns.append(wal_lsn)
+
+    return redone_lsns
 
 
 def undo(transaction_table: dict) -> None:
